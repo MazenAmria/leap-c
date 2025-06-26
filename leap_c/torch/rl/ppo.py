@@ -180,10 +180,10 @@ class PpoTrainer(Trainer):
         ]
         super().__init__(cfg, val_env, output_path, device, wrappers)
 
-        self.train_env = gym.vector.SyncVectorEnv([
-            lambda: seed_env(wrap_env(train_envs[i]), seed=self.cfg.seed + i)
+        self.train_env = seed_env(gym.vector.SyncVectorEnv([
+            lambda: wrap_env(train_envs[i])
             for i, env in enumerate(train_envs)
-        ])
+        ]), self.cfg.seed)
 
         self.q = PpoCritic(
             extractor_cls,
