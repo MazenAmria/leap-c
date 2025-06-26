@@ -11,7 +11,7 @@ from yaml import safe_dump
 
 from leap_c.utils.logger import Logger, LoggerConfig
 from leap_c.utils.rollout import episode_rollout
-from leap_c.utils.gym import wrap_env, WrapperType, seed_env
+from leap_c.utils.gym import wrap_env, WrapperFn, seed_env
 from leap_c.torch.utils.seed import set_seed
 
 
@@ -92,7 +92,7 @@ class Trainer(ABC, nn.Module, Generic[TrainerConfigType]):
             cfg: TrainerConfigType,
             eval_env: gym.Env,
             output_path: str | Path, device: str,
-            wrappers: List[WrapperType] | None = None,
+            wrappers: List[WrapperFn] | None = None,
     ):
         """Initializes the trainer with a configuration, output path, and device.
 
