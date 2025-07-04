@@ -5,18 +5,14 @@ import casadi as ca
 import gymnasium as gym
 import numpy as np
 import torch
-from casadi.tools import struct_symSX
 
 from acados_template import AcadosModel, AcadosOcp
 from leap_c.ocp.acados.parameters import AcadosParamManager
 from leap_c.controller import ParameterizedController
 from leap_c.examples.cartpole.config import CartPoleParams, make_default_cartpole_params
-from leap_c.examples.util import (
-    assign_lower_triangular,
-    find_param_in_p_or_p_global,
-    translate_learnable_param_to_p_global,
-)
 from leap_c.ocp.acados.torch import AcadosDiffMpc
+from leap_c.ocp.acados.diff_mpc import AcadosDiffMpcCtx, collate_acados_diff_mpc_ctx
+from leap_c.ocp.acados.parameters import AcadosParamManager
 
 
 class CartPoleController(ParameterizedController):
@@ -52,6 +48,8 @@ class CartPoleController(ParameterizedController):
             cost = 0.5 * z.T @ W @ z + c.T @ z, where W is the quadratic cost matrix from above
 
     """
+
+    collate_fn_map = {AcadosDiffMpcCtx: collate_acados_diff_mpc_ctx}
 
     def __init__(
         self,
@@ -109,12 +107,19 @@ class CartPoleController(ParameterizedController):
     def jacobian_action_param(self, ctx) -> np.ndarray:
         return self.diff_mpc.sensitivity(ctx, field_name="du0_dp_global")
 
+    @property
     def param_space(self) -> gym.Space:
-        # TODO: can't determine the param space because it depends on the learnable parameters
-        # we need to define boundaries for every parameter and based on that create a gym.Space
-        raise NotImplementedError
+        return gym.spaces.Box(
+            low=-2.0 * np.pi,
+            high=2.0 * np.pi,
+            dtype=np.float64,
+        )
 
+    @property
     def default_param(self) -> np.ndarray:
+        return np.concatenate(
+            [asdict(self.params)[p].flatten() for p in self.learnable_params]
+        )
         return np.concatenate(
             [asdict(self.params)[p].flatten() for p in self.learnable_params]
         )
@@ -128,8 +133,8 @@ def define_f_expl_expr(ocp: AcadosOcp, param_manager: AcadosParamManager) -> ca.
     g = param_manager.get("g")
     l = param_manager.get("l")
 
-    theta = model.x[1]
-    v1 = model.x[2]
+    v = model.x[1]
+    theta = model.x[2]
     dtheta = model.x[3]
 
     F = model.u[0]
@@ -139,11 +144,14 @@ def define_f_expl_expr(ocp: AcadosOcp, param_manager: AcadosParamManager) -> ca.
     sin_theta = ca.sin(theta)
     denominator = M + m - m * cos_theta * cos_theta
     f_expl = ca.vertcat(
-        v1,
+        v,
         dtheta,
         (-m * l * sin_theta * dtheta * dtheta + m * g * cos_theta * sin_theta + F)
         / denominator,
         (
+            -m * l * cos_theta * sin_theta * dtheta * dtheta
+            + F * cos_theta
+            + (M + m) * g * sin_theta
             -m * l * cos_theta * sin_theta * dtheta * dtheta
             + F * cos_theta
             + (M + m) * g * sin_theta
@@ -163,7 +171,7 @@ def define_disc_dyn_expr(
     u = model.u
 
     # discrete dynamics via RK4
-    p = ca.vertcat(*find_param_in_p_or_p_global(["M", "m", "g", "l"], model).values())
+    p = ca.vertcat(param_manager.p.cat, param_manager.p_global.cat)
 
     ode = ca.Function("ode", [x, u, p], [f_expl])
     k1 = ode(x, u, p)
