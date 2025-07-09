@@ -1,6 +1,6 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterator, Type, List
+from typing import Any, Iterator, List, NamedTuple, Type
 
 import gymnasium as gym
 import numpy as np
@@ -9,85 +9,50 @@ import torch.nn as nn
 from gymnasium import spaces
 from torch.distributions import Normal
 
-from leap_c.torch.nn.extractor import IdentityExtractor, Extractor
+from leap_c.controller import ParameterizedController
+from leap_c.torch.nn.extractor import Extractor, IdentityExtractor
 from leap_c.torch.nn.mlp import MLP, MlpConfig
 from leap_c.torch.rl.buffer import ReplayBuffer
-from leap_c.trainer import Trainer, TrainerConfig
-from leap_c.utils.gym import wrap_env, seed_env
+from leap_c.torch.rl.ppo import PpoCritic, PpoTrainerConfig, ClippedSurrogateLoss, ValueSquaredErrorLoss
+from leap_c.trainer import Trainer
+from leap_c.utils.gym import seed_env, wrap_env
 
 
 @dataclass(kw_only=True)
-class PpoTrainerConfig(TrainerConfig):
-    """Contains the necessary information for a PpoTrainer.
-
-    Attributes:
-        critic_mlp: The configuration for the critic network.
-        actor_mlp: The configuration for the actor network.
-        num_steps: The number of steps per rollout.
-        lr_q: The learning rate for the critic network.
-        lr_pi: The learning rate for the actor network.
-        anneal_lr: Whether to anneal the learning rate during training.
-        gamma: The discount factor for future rewards.
-        gae_lambda: The lambda parameter for Generalized Advantage Estimation.
-        clipping_epsilon: The clipping parameter for the PPO loss.
-        l_vf_weight: The weight of the value function loss.
-        l_ent_weight: The weight of the entropy loss.
-        num_mini_batches: The number of mini-batches to use for updates.
-        update_epochs: The number of epochs to update the policy and value networks.
-        normalize_advantages: Whether to normalize advantages.
-        clip_value_loss: Whether to clip the value loss.
-        max_grad_norm: The maximum gradient norm for gradient clipping.
-    """
-
-    critic_mlp: MlpConfig = field(default_factory=MlpConfig)
-    actor_mlp: MlpConfig = field(default_factory=MlpConfig)
-    num_steps: int = 128
-    lr_q: float = 2.5e-4
-    lr_pi: float = 2.5e-4
-    anneal_lr: bool = True
-    gamma: float = 0.99
-    gae_lambda: float = 0.95
-    clipping_epsilon: float = 0.2
-    l_vf_weight: float = 0.25
-    l_ent_weight: float = 0.01
-    num_mini_batches: int = 4
-    update_epochs: int = 4
-    normalize_advantages: bool = True
-    clip_value_loss: bool = True
-    max_grad_norm: float = 0.5
+class PpoFopTrainerConfig(PpoTrainerConfig):
+    entropy_correction: bool = False
 
 
-class PpoCritic(nn.Module):
-    def __init__(
-            self,
-            extractor_cls: Type[Extractor],
-            observation_space: spaces.Space,
-            mlp_cfg: MlpConfig
-    ):
-        super().__init__()
+class PpoFopActorOutput(NamedTuple):
+    param: torch.Tensor
+    log_prob: torch.Tensor
+    entropy: torch.Tensor
+    stats: dict[str, float]
+    action: torch.Tensor
+    status: torch.Tensor
+    ctx: Any | None
 
-        self.extractor = extractor_cls(observation_space)
-
-        self.mlp = MLP(
-            input_sizes=self.extractor.output_size,
-            output_sizes=1,
-            mlp_cfg=mlp_cfg,
+    def select(self, mask: torch.Tensor) -> "PpoFopActorOutput":
+        return PpoFopActorOutput(
+            self.param[mask],
+            self.log_prob[mask],
+            self.entropy[mask],
+            None,  # type:ignore
+            self.action[mask],
+            self.status[mask],
+            None,
         )
 
-    def forward(self, x: torch.Tensor):
-        e = self.extractor(x)
-        value = self.mlp(e)
 
-        return value.squeeze(-1)
-
-
-class PpoActor(nn.Module):
+class PpoFopActor(nn.Module):
     def __init__(
             self,
             extractor_cls: Type[Extractor],
             action_space: spaces.Box,
             observation_space: spaces.Space,
             mlp_cfg: MlpConfig,
+            controller: ParameterizedController,
+            correction: bool = True,
     ):
         super().__init__()
 
@@ -101,60 +66,50 @@ class PpoActor(nn.Module):
 
         self.log_std = nn.Parameter(torch.zeros(1, action_space.shape[0]))
 
-    def forward(self, x: torch.Tensor, deterministic: bool = False, action=None):
-        e = self.extractor(x)
+        self.controller = controller
+        self.correction = correction
+
+    def forward(self, obs: torch.Tensor, deterministic: bool = False, param=None, ctx=None):
+        e = self.extractor(obs)
         mean = self.mlp(e)
         std = self.log_std.expand_as(mean).exp()
 
         probs = Normal(mean, std)
 
-        if action is None:
-            action = probs.mode if deterministic else probs.sample()
+        if param is None:
+            param = probs.mode if deterministic else probs.sample()
 
-        log_prob = probs.log_prob(action).sum(dim=1)
+        log_prob = probs.log_prob(param).sum(dim=1)
         entropy = probs.entropy().sum(dim=1)
 
-        return action, log_prob, entropy
+        ctx, action = self.controller(obs, param, ctx=ctx)
+
+        j = self.controller.jacobian_action_param(ctx)
+        if j is not None and self.correction:
+            jtj = j @ j.transpose(1, 2)
+            correction = (
+                torch.det(jtj + 1e-3 * torch.eye(jtj.shape[1], device=jtj.device))
+                .sqrt()
+                .log()
+            )
+            log_prob -= correction.unsqueeze(1)
+            entropy += correction.unsqueeze(1)
+
+        return PpoFopActorOutput(
+            param=param,
+            log_prob=log_prob,
+            entropy=entropy,
+            stats=ctx.log,
+            action=action,
+            status=ctx.status,
+            ctx=ctx,
+        )
 
 
-class ClippedSurrogateLoss(nn.Module):
-    def __init__(self, epsilon: float):
-        super().__init__()
-        self.epsilon = epsilon
-
-    def forward(self, new_log_prob: torch.Tensor, old_log_prob: torch.Tensor, advantage: torch.Tensor) -> torch.Tensor:
-        ratio = torch.exp(new_log_prob - old_log_prob)
-
-        unclipped_loss = -advantage * ratio
-        clipped_loss = -advantage * torch.clamp(ratio, 1 - self.epsilon, 1 + self.epsilon)
-
-        return torch.max(unclipped_loss, clipped_loss).mean()
-
-
-class ValueSquaredErrorLoss(nn.Module):
-    def __init__(self, clipped: bool = False, epsilon: float = 0.2):
-        super().__init__()
-        self.clipped = clipped
-        self.epsilon = epsilon
-
-    def forward(self, new_values: torch.Tensor, old_values: torch.Tensor, returns: torch.Tensor) -> torch.Tensor:
-        unclipped_loss = (new_values - returns) ** 2
-
-        if self.clipped:
-            value_diff = new_values - old_values
-            clipped_values = old_values + torch.clamp(value_diff, -self.epsilon, self.epsilon)
-            clipped_loss = (clipped_values - returns) ** 2
-            loss = torch.max(unclipped_loss, clipped_loss)
-        else:
-            loss = unclipped_loss
-
-        return loss.mean()
-
-
-class PpoTrainer(Trainer):
+class PpoFopTrainer(Trainer):
     def __init__(
             self,
-            cfg: PpoTrainerConfig,
+            cfg: PpoFopTrainerConfig,
             val_env: gym.Env,
             output_path: str | Path,
             device: str,
@@ -197,11 +152,13 @@ class PpoTrainer(Trainer):
             total_iters=self.cfg.train_steps // (self.cfg.num_steps * self.train_env.num_envs)
         )
 
-        self.pi = PpoActor(
+        self.pi = PpoFopActor(
             extractor_cls,
             self.train_env.single_action_space,  # type: ignore
             self.train_env.single_observation_space,
-            self.cfg.actor_mlp
+            self.cfg.actor_mlp,
+            controller=self.controller,
+            correction=self.cfg.entropy_correction
         )
         self.pi_optim = torch.optim.Adam(self.pi.parameters(), lr=self.cfg.lr_pi)
         self.pi_lr_scheduler = torch.optim.lr_scheduler.LinearLR(
@@ -221,15 +178,18 @@ class PpoTrainer(Trainer):
 
         while True:
             # region Rollout Collection
+            policy_state = None
             obs_collate = torch.tensor(obs, device=self.device)
 
             with torch.no_grad():
-                action, log_prob, _ = self.pi(obs_collate)
+                pi_output = self.pi(obs_collate, ctx=policy_state)
                 value = self.q(obs_collate)
 
             value = value.cpu().numpy()
-            action = action.cpu().numpy()
-            log_prob = log_prob.cpu().numpy()
+            action = pi_output.action.cpu().numpy()
+            log_prob = pi_output.log_prob.cpu().numpy()
+            entropy = pi_output.entropy.cpu().numpy()
+            param = pi_output.param.cpu().numpy()
 
             self.report_stats("train_trajectory", {"action": action}, verbose=True, with_smoothing=False)
 
@@ -237,13 +197,15 @@ class PpoTrainer(Trainer):
 
             self.buffer.put((
                 obs,
-                action,
+                param,
                 log_prob,
+                entropy,
                 reward,
                 obs_prime,
                 is_terminated,
                 np.logical_or(is_terminated, is_truncated),
-                value
+                value,
+                policy_state
             ))
 
             if "episode" in info:
@@ -255,6 +217,7 @@ class PpoTrainer(Trainer):
             # endregion
 
             obs = obs_prime
+            policy_state = pi_output.ctx
 
             if (self.state.step + self.train_env.num_envs) % (self.cfg.num_steps * self.train_env.num_envs) == 0:
                 # region Generalized Advantage Estimation (GAE)
@@ -262,7 +225,7 @@ class PpoTrainer(Trainer):
                 returns = torch.zeros((self.cfg.num_steps, self.train_env.num_envs), device=self.device)
                 with torch.no_grad():
                     for t in reversed(range(self.cfg.num_steps)):
-                        _, _, _, reward, obs_prime, termination, done, value = self.buffer[t]
+                        _, _, _, _, reward, obs_prime, termination, done, value, _ = self.buffer[t]
 
                         reward = reward.squeeze(0)
                         obs_prime = obs_prime.squeeze(0)
@@ -293,10 +256,10 @@ class PpoTrainer(Trainer):
                     for start in range(0, self.cfg.num_steps * self.train_env.num_envs, mini_batch_size):
                         end = start + mini_batch_size
                         mb_indices = indices[start:end]
-                        observations, actions, log_probs, _, _, _, _, values = self.buffer[mb_indices]
+                        observations, params, log_probs, entropy, _, _, _, _, values, ctx = self.buffer[mb_indices]
 
                         observations = observations.flatten(start_dim=0, end_dim=1)
-                        actions = actions.flatten(start_dim=0, end_dim=1)
+                        params = params.flatten(start_dim=0, end_dim=1)
                         log_probs = log_probs.flatten(start_dim=0, end_dim=1)
 
                         mb_advantages = advantages[mb_indices].flatten()
@@ -306,12 +269,12 @@ class PpoTrainer(Trainer):
                             mb_advantages = (mb_advantages - mb_advantages.mean()) / (mb_advantages.std() + 1e-8)
 
                         new_values = self.q(observations)
-                        _, new_log_probs, entropy = self.pi(observations, action=actions)
+                        pi_output = self.pi(observations, param=params, ctx=ctx)
 
                         # Calculating Loss
-                        l_clip = self.clipped_loss(new_log_probs, log_probs, mb_advantages)
+                        l_clip = self.clipped_loss(pi_output.log_prob, log_probs, mb_advantages)
                         l_vf = self.value_loss(new_values, values, mb_returns)
-                        l_ent = -entropy.mean()
+                        l_ent = -pi_output.entropy.mean()
 
                         loss = l_clip + self.cfg.l_ent_weight * l_ent + self.cfg.l_vf_weight * l_vf
 
@@ -344,10 +307,10 @@ class PpoTrainer(Trainer):
     ) -> tuple[np.ndarray, None, dict[str, float]]:
         obs = torch.tensor([obs], device=self.device)
         with torch.no_grad():
-            action, log_prob, entropy = self.pi(obs, deterministic=deterministic)
-        return action.cpu().numpy()[0], None, {
-            "entropy": entropy.cpu().numpy()[0]
-        }
+            output = self.pi(obs, deterministic=deterministic, state=state)
+        
+        action = output.action.cpu().numpy()
+        return action, None, output.stats
 
     @property
     def optimizers(self) -> list[torch.optim.Optimizer]:
