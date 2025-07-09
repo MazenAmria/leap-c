@@ -217,7 +217,7 @@ class PpoTrainer(Trainer):
         self.buffer = ReplayBuffer(self.cfg.num_steps, device)
 
     def train_loop(self) -> Iterator[int]:
-        obs, _ = self.train_env.reset(seed=self.cfg.seed)
+        obs, _ = self.train_env.reset(seed=self.cfg.seed, options={"mode": "train"})
 
         while True:
             # region Rollout Collection
