@@ -42,7 +42,8 @@ def episode_rollout(
     if video_folder is not None and name_prefix is None:
         raise ValueError("name_prefix must be set if video_path is set.")
 
-    render_trigger = lambda episode_id: episode_id < render_episodes
+    def render_trigger(episode_id):
+        return episode_id < render_episodes
 
     if video_folder is not None:
         env = RecordVideo(env, video_folder, name_prefix=name_prefix, episode_trigger=render_trigger)

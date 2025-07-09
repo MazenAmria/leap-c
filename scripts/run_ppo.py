@@ -8,7 +8,7 @@ from leap_c.torch.rl.ppo import PpoTrainerConfig, PpoTrainer
 
 
 def run_ppo(
-        output_path: str | Path, seed: int = 0, env: str = "cartpole", device: str = "cuda"
+        output_path: str | Path, seed: int = 0, env: str = "pointmass", device: str = "cuda"
 ) -> float:
     cfg = PpoTrainerConfig()
     cfg.actor_mlp = MlpConfig(
@@ -52,7 +52,7 @@ def run_ppo(
 
 if __name__ == "__main__":
     parser = create_parser()
-    parser.add_argument("--env", type=str, default="cartpole")
+    parser.add_argument("--env", type=str, default="pointmass")
     args = parser.parse_args()
 
     output_path = default_output_path(seed=args.seed, tags=["ppo", args.env])
