@@ -62,5 +62,7 @@ def create_parser() -> ArgumentParser:
     parser.add_argument("-v", "--verbose", action="store_true")
     parser.add_argument("--device", type=str, default="cpu")
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--wandb", action="store_true", default=False)
+    parser.add_argument("--wandb-team", type=str, default=None)
 
     return parser

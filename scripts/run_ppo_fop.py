@@ -1,10 +1,10 @@
 """Main script to run experiments."""
-from argparse import ArgumentParser
+
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from leap_c.examples import create_env, create_controller
-from leap_c.run import default_output_path, init_run
+from leap_c.examples import create_controller, create_env
+from leap_c.run import create_parser, default_output_path, init_run
 from leap_c.torch.nn.mlp import MlpConfig
 from leap_c.torch.rl.ppo_fop import PpoFopTrainer, PpoFopTrainerConfig
 
@@ -25,6 +25,8 @@ def run_ppo_fop(
     controller_name: str,
     seed: int = 0,
     device: str = "cuda",
+    wandb: bool = False,
+    wandb_kwargs: dict | None = None,
 ) -> float:
     cfg = PpoFopTrainerConfig()
     cfg.actor_mlp = MlpConfig(
@@ -57,6 +59,10 @@ def run_ppo_fop(
     cfg.num_mini_batches = 32
     cfg.seed = seed
 
+    if wandb and wandb_kwargs is not None:
+        cfg.wandb = True
+        cfg.wandb_kwargs = wandb_kwargs
+
     trainer = PpoFopTrainer(
         val_env=create_env(env_name, render_mode="rgb_array"),
         train_envs=[create_env(env_name)],
@@ -71,15 +77,22 @@ def run_ppo_fop(
 
 
 if __name__ == "__main__":
-    parser = ArgumentParser()
-    parser.add_argument("--output_path", type=Path, default=None)
-    parser.add_argument("--device", type=str, default="cuda")
-    parser.add_argument("--seed", type=int, default=0)
+    parser = create_parser()
     parser.add_argument("--env", type=str, default="pointmass")
     parser.add_argument("--controller", type=str, default="pointmass")
     args = parser.parse_args()
 
-    output_path = default_output_path(seed=args.seed, tags=["ppo_fop", args.env, args.controller])
+    output_path = default_output_path(
+        seed=args.seed, tags=["ppo_fop", args.env, args.controller]
+    )
+
+    wandb_kwargs = None
+    if args.wandb:
+        wandb_kwargs = {
+            "project": "leap-c",
+            "team": args.wandb_team,
+            "name": f"ppo_{args.env}_{args.controller}_{args.seed}",
+        }
 
     run_ppo_fop(
         output_path,
@@ -87,4 +100,6 @@ if __name__ == "__main__":
         controller_name=args.controller,
         seed=args.seed,
         device=args.device,
+        wandb=args.wandb,
+        wandb_kwargs=wandb_kwargs,
     )
