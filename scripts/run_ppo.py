@@ -48,8 +48,8 @@ def run_ppo(
     cfg.seed = seed
 
     if wandb and wandb_kwargs is not None:
-        cfg.wandb = True
-        cfg.wandb_kwargs = wandb_kwargs
+        cfg.log.wandb_logger = True
+        cfg.log.wandb_init_kwargs = wandb_kwargs
 
     trainer = PpoTrainer(
         val_env=create_env(env, render_mode="rgb_array"),
@@ -74,8 +74,8 @@ if __name__ == "__main__":
     if args.wandb:
         wandb_kwargs = {
             "project": "leap-c",
-            "team": args.wandb_team,
-            "name": f"ppo_{args.env}_{args.seed}",
+            "entity": args.wandb_team,
+            "name": f"ppo_env_{args.env}_seed_{args.seed}",
         }
 
     run_ppo(output_path, seed=args.seed, env=args.env, device=args.device, wandb=args.wandb, wandb_kwargs=wandb_kwargs)
