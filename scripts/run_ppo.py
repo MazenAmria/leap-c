@@ -25,17 +25,20 @@ def run_ppo(
     cfg.val_interval = 10_000
     cfg.lr_q = 3e-4
     cfg.lr_pi = 3e-4
+    cfg.anneal_lr = True
     cfg.update_epochs = 10
     cfg.num_steps = 2048
     cfg.num_mini_batches = 32
     cfg.clipping_epsilon = 0.2
     cfg.l_vf_weight = 0.25
-    cfg.l_ent_weight = 0.0
+    cfg.l_ent_weight = 0.001
     cfg.gamma = 0.99
     cfg.gae_lambda = 0.95
+    cfg.clipping_epsilon = 0.2
     cfg.clip_value_loss = True
     cfg.normalize_advantages = True
     cfg.max_grad_norm = 0.5
+    cfg.num_mini_batches = 32
     cfg.seed = seed
 
     trainer = PpoTrainer(
