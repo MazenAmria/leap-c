@@ -60,11 +60,11 @@ class PpoFopActor(nn.Module):
 
         self.mlp = MLP(
             input_sizes=self.extractor.output_size,
-            output_sizes=action_space.shape[0],  # type: ignore
+            output_sizes=controller.param_space.shape[0],  # type: ignore
             mlp_cfg=mlp_cfg,
         )
 
-        self.log_std = nn.Parameter(torch.zeros(1, action_space.shape[0]))
+        self.log_std = nn.Parameter(torch.zeros(1, controller.param_space.shape[0]))
 
         self.controller = controller
         self.correction = correction
@@ -114,6 +114,7 @@ class PpoFopTrainer(Trainer):
             output_path: str | Path,
             device: str,
             train_envs: List[gym.Env],
+            controller: ParameterizedController,
             extractor_cls: Type[Extractor] = IdentityExtractor,
     ):
         """Initializes the trainer with a configuration, output path, and device.
@@ -157,7 +158,7 @@ class PpoFopTrainer(Trainer):
             self.train_env.single_action_space,  # type: ignore
             self.train_env.single_observation_space,
             self.cfg.actor_mlp,
-            controller=self.controller,
+            controller=controller,
             correction=self.cfg.entropy_correction
         )
         self.pi_optim = torch.optim.Adam(self.pi.parameters(), lr=self.cfg.lr_pi)
@@ -171,7 +172,7 @@ class PpoFopTrainer(Trainer):
         self.clipped_loss = ClippedSurrogateLoss(self.cfg.clipping_epsilon)
         self.value_loss = ValueSquaredErrorLoss(self.cfg.clip_value_loss, self.cfg.clipping_epsilon)
 
-        self.buffer = ReplayBuffer(self.cfg.num_steps, device)
+        self.buffer = ReplayBuffer(self.cfg.num_steps, device, collate_fn_map=controller.collate_fn_map)
 
     def train_loop(self) -> Iterator[int]:
         obs, _ = self.train_env.reset(seed=self.cfg.seed, options={"mode": "train"})
@@ -205,7 +206,7 @@ class PpoFopTrainer(Trainer):
                 is_terminated,
                 np.logical_or(is_terminated, is_truncated),
                 value,
-                policy_state
+                pi_output.ctx
             ))
 
             if "episode" in info:
@@ -305,11 +306,11 @@ class PpoFopTrainer(Trainer):
     def act(
             self, obs, deterministic: bool = False, state=None
     ) -> tuple[np.ndarray, None, dict[str, float]]:
-        obs = torch.tensor([obs], device=self.device)
+        obs = self.buffer.collate([obs])
         with torch.no_grad():
-            output = self.pi(obs, deterministic=deterministic, state=state)
+            output = self.pi(obs, deterministic=deterministic, ctx=state)
         
-        action = output.action.cpu().numpy()
+        action = output.action.cpu().numpy()[0]
         return action, None, output.stats
 
     @property

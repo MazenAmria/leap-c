@@ -342,7 +342,7 @@ class PpoTrainer(Trainer):
     def act(
             self, obs, deterministic: bool = False, state=None
     ) -> tuple[np.ndarray, None, dict[str, float]]:
-        obs = torch.tensor([obs], device=self.device)
+        obs = self.buffer.collate([obs])
         with torch.no_grad():
             action, log_prob, entropy = self.pi(obs, deterministic=deterministic)
         return action.cpu().numpy()[0], None, {
