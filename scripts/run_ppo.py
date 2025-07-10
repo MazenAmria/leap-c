@@ -1,14 +1,20 @@
 """Main script to run experiments."""
+
 from pathlib import Path
 
 from leap_c.examples import create_env
 from leap_c.run import create_parser, default_output_path, init_run
 from leap_c.torch.nn.mlp import MlpConfig
-from leap_c.torch.rl.ppo import PpoTrainerConfig, PpoTrainer
+from leap_c.torch.rl.ppo import PpoTrainer, PpoTrainerConfig
 
 
 def run_ppo(
-        output_path: str | Path, seed: int = 0, env: str = "pointmass", device: str = "cuda"
+    output_path: str | Path,
+    seed: int = 0,
+    env: str = "pointmass",
+    device: str = "cuda",
+    wandb: bool = False,
+    wandb_kwargs: dict | None = None,
 ) -> float:
     cfg = PpoTrainerConfig()
     cfg.actor_mlp = MlpConfig(
@@ -41,6 +47,10 @@ def run_ppo(
     cfg.num_mini_batches = 32
     cfg.seed = seed
 
+    if wandb and wandb_kwargs is not None:
+        cfg.wandb = True
+        cfg.wandb_kwargs = wandb_kwargs
+
     trainer = PpoTrainer(
         val_env=create_env(env, render_mode="rgb_array"),
         train_envs=[create_env(env)],
@@ -60,4 +70,12 @@ if __name__ == "__main__":
 
     output_path = default_output_path(seed=args.seed, tags=["ppo", args.env])
 
-    run_ppo(output_path, seed=args.seed, env=args.env, device=args.device)
+    wandb_kwargs = None
+    if args.wandb:
+        wandb_kwargs = {
+            "project": "leap-c",
+            "team": args.wandb_team,
+            "name": f"ppo_{args.env}_{args.seed}",
+        }
+
+    run_ppo(output_path, seed=args.seed, env=args.env, device=args.device, wandb=args.wandb, wandb_kwargs=wandb_kwargs)
