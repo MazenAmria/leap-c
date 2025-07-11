@@ -111,11 +111,12 @@ def _cost_expr_ext_cost(ocp: AcadosOcp) -> ca.SX:
 def _cost_expr_ext_cost_e(ocp: AcadosOcp) -> ca.SX:
     x = ocp.model.x
 
+    # Jasper: used q_diag instead of q_diag_e here.
     Q_sqrt_e = _create_diag_matrix(
-        find_param_in_p_or_p_global(["q_diag_e"], ocp.model)["q_diag_e"]
+        find_param_in_p_or_p_global(["q_diag"], ocp.model)["q_diag"]
     )
-
-    xref_e = find_param_in_p_or_p_global(["xref_e"], ocp.model)["xref_e"]
+    # Jasper: used xref instead of xref_e here.
+    xref_e = find_param_in_p_or_p_global(["xref"], ocp.model)["xref"]
 
     return 0.5 * ca.mtimes([ca.transpose(x - xref_e), Q_sqrt_e.T, Q_sqrt_e, x - xref_e])
 

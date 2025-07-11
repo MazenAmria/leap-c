@@ -1,9 +1,10 @@
-from typing import Dict, Type
+from typing import Any, Dict, Type
 
 from pathlib import Path
 from leap_c.task import Task
-from leap_c.trainer import BaseConfig, Trainer
+from leap_c.trainer import Trainer
 
+BaseConfig = Any
 
 TASK_REGISTRY: Dict[str, Type[Task]] = {}
 DEFAULT_CFG_REGISTRY: Dict[str, BaseConfig] = {}
