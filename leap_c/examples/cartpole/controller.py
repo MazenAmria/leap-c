@@ -1,22 +1,18 @@
 from dataclasses import asdict
-from typing import Any
+from typing import Any, Literal
 
 import casadi as ca
 import gymnasium as gym
 import numpy as np
 import torch
-from casadi.tools import struct_symSX
 
 from acados_template import AcadosModel, AcadosOcp
 from leap_c.ocp.acados.parameters import AcadosParamManager
 from leap_c.controller import ParameterizedController
 from leap_c.examples.cartpole.config import CartPoleParams, make_default_cartpole_params
-from leap_c.examples.util import (
-    assign_lower_triangular,
-    find_param_in_p_or_p_global,
-    translate_learnable_param_to_p_global,
-)
 from leap_c.ocp.acados.torch import AcadosDiffMpc
+from leap_c.ocp.acados.diff_mpc import AcadosDiffMpcCtx, collate_acados_diff_mpc_ctx
+from leap_c.ocp.acados.parameters import AcadosParamManager
 
 
 class CartPoleController(ParameterizedController):
@@ -53,15 +49,18 @@ class CartPoleController(ParameterizedController):
 
     """
 
+    collate_fn_map = {AcadosDiffMpcCtx: collate_acados_diff_mpc_ctx}
+
     def __init__(
         self,
         params: CartPoleParams | None = None,
-        N_horizon: int = 20,
-        T_horizon: float = 1.0,
+        N_horizon: int = 5,
+        T_horizon: float = 0.25,
         Fmax: float = 80.0,
-        discount_factor: float = 0.99,
+        discount_factor: float = 1.00,
         exact_hess_dyn: bool = True,
-        cost_type: str = "NONLINEAR_LS",
+        cost_type: Literal["EXTERNAL", "NONLINEAR_LS"] = "NONLINEAR_LS",
+        stagewise: bool = False,
     ):
         """
         Args:
@@ -79,15 +78,19 @@ class CartPoleController(ParameterizedController):
                 (currently this is static).
             exact_hess_dyn: If False, the contributions of the dynamics will be left out of the Hessian.
             cost_type: The type of cost to use, either "EXTERNAL" or "NONLINEAR_LS".
+            stagewise: If True, the parameters will be stagewise, meaning that they can change over the horizon.
+                If False, the parameters will be global, meaning that they are the same for all steps in the horizon.
         """
         super().__init__()
-        self.params = make_default_cartpole_params() if params is None else params
+        self.params = make_default_cartpole_params(stagewise=stagewise) if params is None else params
         tuple_params = tuple(asdict(self.params).values())
 
-        param_manager = AcadosParamManager(params=tuple_params, N_horizon=N_horizon)
+        self.param_manager = AcadosParamManager(
+            params=tuple_params, N_horizon=N_horizon  # type:ignore
+        )
 
         self.ocp = export_parametric_ocp(
-            param_manager=param_manager,
+            param_manager=self.param_manager,
             cost_type=cost_type,
             exact_hess_dyn=exact_hess_dyn,
             name="cartpole",
@@ -99,37 +102,31 @@ class CartPoleController(ParameterizedController):
         self.diff_mpc = AcadosDiffMpc(self.ocp, discount_factor=discount_factor)
 
     def forward(self, obs, param, ctx=None) -> tuple[Any, torch.Tensor]:
-        x0 = torch.as_tensor(obs, dtype=torch.float64)
-        p_global = torch.as_tensor(param, dtype=torch.float64)
-        ctx, u0, x, u, value = self.diff_mpc(
-            x0.unsqueeze(0), p_global=p_global.unsqueeze(0), ctx=ctx
-        )
+        p_stagewise = self.param_manager.combine_parameter_values(batch_size=obs.shape[0])
+        ctx, u0, x, u, value = self.diff_mpc(obs, p_global=param, p_stagewise=p_stagewise, ctx=ctx)
         return ctx, u0
 
     def jacobian_action_param(self, ctx) -> np.ndarray:
         return self.diff_mpc.sensitivity(ctx, field_name="du0_dp_global")
 
+    @property
     def param_space(self) -> gym.Space:
-        # TODO: can't determine the param space because it depends on the learnable parameters
-        # we need to define boundaries for every parameter and based on that create a gym.Space
-        raise NotImplementedError
+        low, high = self.param_manager.get_p_global_bounds()
+        return gym.spaces.Box(low=low, high=high, dtype=np.float64)  # type:ignore
 
+    @property
     def default_param(self) -> np.ndarray:
-        return np.concatenate(
-            [asdict(self.params)[p].flatten() for p in self.learnable_params]
-        )
+        return self.param_manager.p_global_values.cat.full().flatten()  # type:ignore
 
 
-def define_f_expl_expr(ocp: AcadosOcp, param_manager: AcadosParamManager) -> ca.SX:
-    model = ocp.model
-
+def define_f_expl_expr(model: AcadosModel, param_manager: AcadosParamManager) -> ca.SX:
     M = param_manager.get("M")
     m = param_manager.get("m")
     g = param_manager.get("g")
     l = param_manager.get("l")
 
     theta = model.x[1]
-    v1 = model.x[2]
+    v = model.x[2]
     dtheta = model.x[3]
 
     F = model.u[0]
@@ -139,7 +136,7 @@ def define_f_expl_expr(ocp: AcadosOcp, param_manager: AcadosParamManager) -> ca.
     sin_theta = ca.sin(theta)
     denominator = M + m - m * cos_theta * cos_theta
     f_expl = ca.vertcat(
-        v1,
+        v,
         dtheta,
         (-m * l * sin_theta * dtheta * dtheta + m * g * cos_theta * sin_theta + F)
         / denominator,
@@ -163,7 +160,7 @@ def define_disc_dyn_expr(
     u = model.u
 
     # discrete dynamics via RK4
-    p = ca.vertcat(*find_param_in_p_or_p_global(["M", "m", "g", "l"], model).values())
+    p = ca.vertcat(param_manager.p.cat, param_manager.p_global.cat)
 
     ode = ca.Function("ode", [x, u, p], [f_expl])
     k1 = ode(x, u, p)
@@ -176,13 +173,12 @@ def define_disc_dyn_expr(
 
 def define_cost_matrix(
     model: AcadosModel, param_manager: AcadosParamManager
-) -> tuple[ca.SX, ca.SX] | tuple[np.ndarray, np.ndarray]:
+) -> ca.SX | np.ndarray:
     q_diag = param_manager.get("q_diag")
     r_diag = param_manager.get("r_diag")
-    q_diag_e = param_manager.get("q_diag_e")
 
     if isinstance(q_diag, np.ndarray) and isinstance(r_diag, np.ndarray):
-        W = np.diag([q_diag, r_diag])
+        W = np.diag(np.concatenate([q_diag, r_diag]))
         W = W @ W.T
     else:
         # TODO (Jasper): Check whether we can even vertcat the diagonal elementst
@@ -190,40 +186,45 @@ def define_cost_matrix(
         W = ca.diag(ca.vertcat(q_diag, r_diag))
         W = W @ W.T
 
-    if isinstance(q_diag_e, np.ndarray):
-        W_e = np.diag(q_diag_e)
-    else:
-        W_e = ca.diag(q_diag_e)
-
-    return W, W_e
+    return W
 
 
-def define_yref(param_manager: AcadosParamManager) -> np.ndarray:
-    xref = param_manager.get("xref")
+def define_yref(param_manager: AcadosParamManager):
+    # xref0 = np.array([0.0])
+    xref0 = param_manager.get("xref0")
+    xref1 = param_manager.get("xref1")
+    xref2 = param_manager.get("xref2")
+    xref3 = param_manager.get("xref3")
+    xref = ca.vertcat(xref0, xref1, xref2, xref3)  # type:ignore
     uref = param_manager.get("uref")
 
-    if isinstance(xref, np.ndarray) and isinstance(uref, np.ndarray):
-        return np.concatenate([xref, uref])
+    yref = ca.vertcat(xref, uref)  # type:ignore
 
-    return ca.vertcat(xref, uref)  # type:ignore
+    if isinstance(yref, ca.DM):
+        yref = yref.full()
+
+    return yref
 
 
 def define_cost_expr_ext_cost(
     ocp: AcadosOcp, param_manager: AcadosParamManager
 ) -> ca.SX:
     yref = define_yref(param_manager)
-    W = define_cost_matrix(ocp.model, param_manager)[0]
+    W = define_cost_matrix(ocp.model, param_manager)
     y = ca.vertcat(ocp.model.x, ocp.model.u)  # type:ignore
-    return 0.5 * ca.mtimes(ca.mtimes((y - yref).T, W), (y - yref))
+    return 0.5 * (y - yref).T @ W @ (y - yref)
 
 
 def define_cost_expr_ext_cost_e(
     ocp: AcadosOcp, param_manager: AcadosParamManager
 ) -> ca.SX:
-    yref_e = param_manager.get("yref_e")
-    W_e = define_cost_matrix(ocp.model, param_manager)[1]
+    yref = define_yref(param_manager)
+    yref_e = yref[: ocp.dims.nx]  # type:ignore
+
+    W = define_cost_matrix(ocp.model, param_manager)
+    W_e = W[: ocp.dims.nx, : ocp.dims.nx]  # type:ignore
     y_e = ocp.model.x
-    return 0.5 * ca.mtimes(ca.mtimes((y_e - yref_e).T, W_e), (y_e - yref_e))
+    return 0.5 * (y_e - yref_e).T @ W_e @ (y_e - yref_e)
 
 
 def export_parametric_ocp(
@@ -238,10 +239,10 @@ def export_parametric_ocp(
     ocp = AcadosOcp()
 
     ocp.solver_options.N_horizon = N_horizon
+    ocp.solver_options.tf = tf
 
     param_manager.assign_to_ocp(ocp)
 
-    ocp.solver_options.tf = tf
     dt = ocp.solver_options.tf / ocp.solver_options.N_horizon
 
     ######## Model ########
@@ -260,10 +261,14 @@ def export_parametric_ocp(
     ######## Cost ########
     if cost_type == "EXTERNAL":
         ocp.cost.cost_type = cost_type
-        ocp.model.cost_expr_ext_cost = define_cost_expr_ext_cost(ocp, param_manager)  # type:ignore
+        ocp.model.cost_expr_ext_cost = define_cost_expr_ext_cost(
+            ocp, param_manager
+        )  # type:ignore
 
         ocp.cost.cost_type_e = cost_type
-        ocp.model.cost_expr_ext_cost_e = define_cost_expr_ext_cost_e(ocp, param_manager)  # type:ignore
+        ocp.model.cost_expr_ext_cost_e = define_cost_expr_ext_cost_e(
+            ocp, param_manager
+        )  # type:ignore
 
         ocp.solver_options.hessian_approx = "EXACT"
         ocp.solver_options.exact_hess_cost = True
@@ -272,13 +277,13 @@ def export_parametric_ocp(
         ocp.cost.cost_type = "NONLINEAR_LS"
         ocp.cost.cost_type_e = "NONLINEAR_LS"
 
-        ocp.cost.W = define_cost_matrix(ocp.model, param_manager=param_manager)[0]
+        ocp.cost.W = define_cost_matrix(ocp.model, param_manager=param_manager)
         ocp.cost.yref = define_yref(param_manager=param_manager)
         ocp.model.cost_y_expr = ca.vertcat(ocp.model.x, ocp.model.u)
 
-        ocp.cost.W_e = define_cost_matrix(ocp.model, param_manager=param_manager)[1]
-        ocp.cost.yref_e = param_manager.get("xref_e")
-        ocp.model.cost_y_expr_e = ocp.model.x
+        ocp.cost.W_e = ocp.cost.W[: ocp.dims.nx, : ocp.dims.nx]  # type:ignore
+        ocp.cost.yref_e = ocp.cost.yref[: ocp.dims.nx]  # type:ignore
+        ocp.model.cost_y_expr_e = ocp.model.cost_y_expr[: ocp.dims.nx]  # type:ignore
 
         ocp.solver_options.hessian_approx = "GAUSS_NEWTON"
     else:
@@ -314,6 +319,5 @@ def export_parametric_ocp(
     ocp.solver_options.exact_hess_dyn = exact_hess_dyn
     ocp.solver_options.qp_solver = "PARTIAL_CONDENSING_HPIPM"
     ocp.solver_options.qp_solver_ric_alg = 1
-    ocp.solver_options.with_batch_functionality = True
 
     return ocp
