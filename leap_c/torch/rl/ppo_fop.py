@@ -11,6 +11,7 @@ from torch.distributions import Normal
 
 from leap_c.controller import ParameterizedController
 from leap_c.torch.nn.extractor import Extractor, IdentityExtractor
+from leap_c.torch.nn.gaussian import BoundedTransform
 from leap_c.torch.nn.mlp import MLP, MlpConfig
 from leap_c.torch.rl.buffer import ReplayBuffer
 from leap_c.torch.rl.ppo import PpoCritic, PpoTrainerConfig, ClippedSurrogateLoss, ValueSquaredErrorLoss
@@ -48,7 +49,6 @@ class PpoFopActor(nn.Module):
     def __init__(
             self,
             extractor_cls: Type[Extractor],
-            action_space: spaces.Box,
             observation_space: spaces.Space,
             mlp_cfg: MlpConfig,
             controller: ParameterizedController,
