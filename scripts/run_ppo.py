@@ -11,7 +11,7 @@ from leap_c.torch.rl.ppo import PpoTrainer, PpoTrainerConfig
 def run_ppo(
     output_path: str | Path,
     seed: int = 0,
-    env: str = "pointmass",
+    env: str = "cartpole",
     device: str = "cuda",
     wandb: bool = False,
     wandb_kwargs: dict | None = None,
@@ -65,7 +65,7 @@ def run_ppo(
 
 if __name__ == "__main__":
     parser = create_parser()
-    parser.add_argument("--env", type=str, default="pointmass")
+    parser.add_argument("--env", type=str, default="cartpole")
     args = parser.parse_args()
 
     output_path = default_output_path(seed=args.seed, tags=["ppo", args.env])

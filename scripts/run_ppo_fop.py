@@ -13,8 +13,8 @@ from leap_c.torch.rl.ppo_fop import PpoFopTrainer, PpoFopTrainerConfig
 class RunPpoFopConfig:
     """Configuration for running PPO experiments."""
 
-    env_name: str = "pointmass"
-    controller_name: str = "pointmass"
+    env_name: str = "cartpole"
+    controller_name: str = "cartpole"
     device: str = "cuda"  # or 'cpu'
     trainer: PpoFopTrainerConfig = field(default_factory=PpoFopTrainerConfig)
 
@@ -78,8 +78,8 @@ def run_ppo_fop(
 
 if __name__ == "__main__":
     parser = create_parser()
-    parser.add_argument("--env", type=str, default="pointmass")
-    parser.add_argument("--controller", type=str, default="pointmass")
+    parser.add_argument("--env", type=str, default="cartpole")
+    parser.add_argument("--controller", type=str, default="cartpole")
     args = parser.parse_args()
 
     output_path = default_output_path(
