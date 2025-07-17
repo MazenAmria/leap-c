@@ -1,13 +1,13 @@
-from typing import List, Callable
+from typing import List, Callable, TypeVar
 
 import gymnasium as gym
-from gymnasium.core import ObsType, ActType
 from gymnasium.wrappers import OrderEnforcing, RecordEpisodeStatistics
 
-WrapperType = Callable[[gym.Env[ObsType, ActType]], gym.Env[ObsType, ActType]]
+WrapperFn = Callable[[gym.Env], gym.Env]
+AnyEnv = TypeVar('AnyEnv', gym.Env, gym.vector.SyncVectorEnv)
 
 
-def wrap_env(env: gym.Env, wrappers: List[WrapperType] | None = None) -> gym.Env:
+def wrap_env(env: gym.Env, wrappers: List[WrapperFn] | None = None) -> gym.Env:
     """Wraps a gymnasium environment.
 
     Args:
@@ -28,7 +28,7 @@ def wrap_env(env: gym.Env, wrappers: List[WrapperType] | None = None) -> gym.Env
     return env
 
 
-def seed_env(env: gym.Env, seed: int = 0) -> gym.Env:
+def seed_env(env: AnyEnv, seed: int = 0) -> AnyEnv:
     """Seeds the environment.
 
     Args:
@@ -36,7 +36,7 @@ def seed_env(env: gym.Env, seed: int = 0) -> gym.Env:
         seed: The seed to use.
 
     Returns:
-        gym.Env: The seeded environment.
+        AnyEnv: The seeded environment.
     """
     env.reset(seed=seed)
     env.observation_space.seed(seed)

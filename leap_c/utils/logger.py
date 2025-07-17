@@ -154,11 +154,11 @@ class Logger:
 
         # init wandb
         if cfg.wandb_logger:
-            if not cfg.log.wandb_init_kwargs.get("dir", False):  # type:ignore
+            if not cfg.wandb_init_kwargs.get("dir", False):  # type:ignore
                 wandbdir = self.output_path / "wandb"
                 wandbdir.mkdir(exist_ok=True)
                 cfg.wandb_init_kwargs["dir"] = str(wandbdir)
-            wandb.init(**cfg.wandb_init_kwargs)
+            self.wandb_run = wandb.init(**cfg.wandb_init_kwargs)
 
         # tensorboard
         if cfg.tensorboard_logger:
@@ -217,7 +217,7 @@ class Logger:
 
         for report_timestamp, report_stats in report_loop:
             if self.cfg.wandb_logger:
-                wandb.log(
+                self.wandb_run.log(
                     {f"{group}/{k}": v for k, v in report_stats.items()},
                     step=report_timestamp,
                 )
@@ -247,4 +247,4 @@ class Logger:
             self.writer.close()
 
         if self.cfg.wandb_logger:
-            wandb.finish()
+            self.wandb_run.finish()
