@@ -1,13 +1,15 @@
 """Main script to run experiments."""
 
+import os
 from pathlib import Path
+
+import optuna
+import torch
 
 from leap_c.examples import create_env
 from leap_c.run import create_parser, default_output_path, init_run
 from leap_c.torch.nn.mlp import MlpConfig
 from leap_c.torch.rl.ppo import PpoTrainer, PpoTrainerConfig
-
-import optuna
 
 
 def run_ppo(
@@ -74,7 +76,11 @@ if __name__ == "__main__":
     parser.add_argument("--env", type=str, default="pointmass")
     args = parser.parse_args()
 
+    NUM_GPUS = torch.cuda.device_count()
+
     def objective(trial) -> float:
+        gpu_id = trial.number % NUM_GPUS
+        os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
         output_path = default_output_path(seed=args.seed, tags=["ppo", args.env])
 
         wandb_kwargs = None
@@ -83,13 +89,14 @@ if __name__ == "__main__":
                 "project": "leap-c",
                 "entity": args.wandb_team,
                 "name": f"ppo_env_{args.env}_seed_{args.seed}_run_{trial.number}",
+                "reinit": True,
             }
 
-        clipping_epsilon = trial.suggest_float('clipping_epsilon', 0.1, 0.3)
-        lr = trial.suggest_float('lr', 1e-5, 5e-4, log=True)
-        update_epochs = trial.suggest_int('update_epochs', 3, 15)
-        gae_lambda = trial.suggest_float('gae_lambda', 0.9, 0.97)
-        l_ent_weight = trial.suggest_float('l_ent_weight', 1e-4, 0.01, log=True)
+        clipping_epsilon = trial.suggest_float("clipping_epsilon", 0.1, 0.3)
+        lr = trial.suggest_float("lr", 1e-5, 5e-4, log=True)
+        update_epochs = trial.suggest_int("update_epochs", 5, 50, log=True)
+        gae_lambda = trial.suggest_float("gae_lambda", 0.9, 0.97)
+        l_ent_weight = trial.suggest_float("l_ent_weight", 1e-4, 0.01, log=True)
 
         return run_ppo(
             clipping_epsilon=clipping_epsilon,
@@ -100,11 +107,10 @@ if __name__ == "__main__":
             output_path=output_path,
             seed=args.seed,
             env=args.env,
-            device=args.device,
+            device="cuda",
             wandb=args.wandb,
-            wandb_kwargs=wandb_kwargs
+            wandb_kwargs=wandb_kwargs,
         )
 
-
     study = optuna.create_study(direction="maximize")
-    study.optimize(objective, n_trials=20)
+    study.optimize(objective, n_trials=20, n_jobs=NUM_GPUS)
