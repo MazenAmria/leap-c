@@ -1,11 +1,6 @@
 """Main script to run experiments."""
 
-import time
-import os
 from pathlib import Path
-
-import optuna
-import torch
 
 from leap_c.examples import create_env
 from leap_c.run import create_parser, default_output_path, init_run
@@ -75,42 +70,39 @@ def run_ppo(
 if __name__ == "__main__":
     parser = create_parser()
     parser.add_argument("--env", type=str, default="pointmass")
+    parser.add_argument("--clipping_epsilon", type=float, default=0.2)
+    parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--update_epochs", type=int, default=10)
+    parser.add_argument("--gae_lambda", type=float, default=0.95)
+    parser.add_argument("--l_ent_weight", type=float, default=0.01)
+    parser.add_argument("--run_id", type=int, default=0)
     args = parser.parse_args()
 
-    NUM_GPUS = torch.cuda.device_count()
+    output_path = default_output_path(
+        seed=args.seed, tags=["ppo", args.env, f"run_{args.run_id}"]
+    )
 
-    def objective(trial) -> float:
-        gpu_id = trial.number % NUM_GPUS
-        output_path = default_output_path(seed=args.seed, tags=["ppo", args.env, "run", trial.number])
+    wandb_kwargs = None
+    if args.wandb:
+        wandb_kwargs = {
+            "project": "leap-c",
+            "entity": args.wandb_team,
+            "name": f"ppo_env_{args.env}_seed_{args.seed}_run_{args.run_id}",
+        }
 
-        wandb_kwargs = None
-        if args.wandb:
-            wandb_kwargs = {
-                "project": "leap-c",
-                "entity": args.wandb_team,
-                "name": f"ppo_env_{args.env}_seed_{args.seed}_run_{trial.number}",
-                "reinit": True,
-            }
+    score = run_ppo(
+        output_path=output_path,
+        clipping_epsilon=args.clipping_epsilon,
+        lr=args.lr,
+        update_epochs=args.update_epochs,
+        gae_lambda=args.gae_lambda,
+        l_ent_weight=args.l_ent_weight,
+        env=args.env,
+        seed=args.seed,
+        device=args.device,
+        wandb=args.wandb,
+        wandb_kwargs=wandb_kwargs
+    )
 
-        clipping_epsilon = trial.suggest_float("clipping_epsilon", 0.1, 0.3)
-        lr = trial.suggest_float("lr", 1e-5, 5e-4, log=True)
-        update_epochs = trial.suggest_int("update_epochs", 5, 50, log=True)
-        gae_lambda = trial.suggest_float("gae_lambda", 0.9, 0.97)
-        l_ent_weight = trial.suggest_float("l_ent_weight", 1e-4, 0.01, log=True)
-
-        return run_ppo(
-            clipping_epsilon=clipping_epsilon,
-            lr=lr,
-            update_epochs=update_epochs,
-            gae_lambda=gae_lambda,
-            l_ent_weight=l_ent_weight,
-            output_path=output_path,
-            seed=args.seed,
-            env=args.env,
-            device=f"cuda:{gpu_id}",
-            wandb=args.wandb,
-            wandb_kwargs=wandb_kwargs,
-        )
-
-    study = optuna.create_study(direction="maximize")
-    study.optimize(objective, n_trials=20, n_jobs=NUM_GPUS)
+    print()
+    print(2.0)
