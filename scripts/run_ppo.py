@@ -1,5 +1,6 @@
 """Main script to run experiments."""
 
+import time
 import os
 from pathlib import Path
 
@@ -80,7 +81,6 @@ if __name__ == "__main__":
 
     def objective(trial) -> float:
         gpu_id = trial.number % NUM_GPUS
-        os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
         output_path = default_output_path(seed=args.seed, tags=["ppo", args.env])
 
         wandb_kwargs = None
@@ -107,7 +107,7 @@ if __name__ == "__main__":
             output_path=output_path,
             seed=args.seed,
             env=args.env,
-            device="cuda",
+            device=f"cuda:{gpu_id}",
             wandb=args.wandb,
             wandb_kwargs=wandb_kwargs,
         )
