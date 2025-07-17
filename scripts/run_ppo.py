@@ -81,7 +81,7 @@ if __name__ == "__main__":
 
     def objective(trial) -> float:
         gpu_id = trial.number % NUM_GPUS
-        output_path = default_output_path(seed=args.seed, tags=["ppo", args.env])
+        output_path = default_output_path(seed=args.seed, tags=["ppo", args.env, "run", trial.number])
 
         wandb_kwargs = None
         if args.wandb:
