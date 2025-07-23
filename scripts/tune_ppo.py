@@ -24,16 +24,6 @@ def objective(
 ) -> float:
     """Objective function for hyperparameter tuning."""
 
-    print(pipeline_directory)
-
-    wandb_kwargs = None
-    if wandb:
-        wandb_kwargs = {
-            "project": "leap-c",
-            "entity": wandb_team,
-            "name": pipeline_directory.parts[-1],
-        }
-
     cfg = PpoTrainerConfig()
     cfg.actor_mlp = MlpConfig(
         hidden_dims=(64, 64),
@@ -64,9 +54,14 @@ def objective(
     cfg.num_mini_batches = 32
     cfg.seed = 0
 
-    if wandb and wandb_kwargs is not None:
+    if wandb and wandb_team is not None:
         cfg.log.wandb_logger = True
-        cfg.log.wandb_init_kwargs = wandb_kwargs
+        cfg.log.wandb_init_kwargs = {
+            "project": "leap-c",
+            "entity": wandb_team,
+            "name": pipeline_directory.parts[-1],
+            "config": cfg
+        }
 
     trainer = PpoTrainer(
         val_env=create_env(env, difficulty="easy", render_mode="rgb_array"),
