@@ -113,7 +113,8 @@ neps.run(
     evaluate_pipeline=evaluate_pipeline,
     pipeline_space=pipeline_space,
     max_evaluations_total=160,
-    max_evaluations_per_run=20,
     root_directory=args.output_path,
-    optimizer=neps.algorithms.successive_halving,
+    optimizer=neps.algorithms.async_hb,
+    continue_until_max_evaluation_completed=True, 
+    overwrite_working_directory=False,
 )
