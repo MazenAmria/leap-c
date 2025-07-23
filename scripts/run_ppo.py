@@ -106,7 +106,3 @@ if __name__ == "__main__":
         wandb=args.wandb,
         wandb_kwargs=wandb_kwargs
     )
-
-    print()
-    print(score)
-
