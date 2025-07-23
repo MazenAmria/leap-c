@@ -15,6 +15,7 @@ def run_ppo(
     gae_lambda: float,
     l_ent_weight: float,
     output_path: str | Path,
+    steps: int = 1000000,
     seed: int = 0,
     env: str = "pointmass",
     device: str = "cuda",
@@ -32,7 +33,7 @@ def run_ppo(
         activation="tanh",
         weight_init="orthogonal",
     )
-    cfg.train_steps = 1_000_000
+    cfg.train_steps = steps
     cfg.val_interval = 10_000
     cfg.lr_q = lr
     cfg.lr_pi = lr
@@ -70,6 +71,7 @@ def run_ppo(
 if __name__ == "__main__":
     parser = create_parser()
     parser.add_argument("--env", type=str, default="pointmass")
+    parser.add_argument("--steps", type=int, default=1000000)
     parser.add_argument("--clipping_epsilon", type=float, default=0.2)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--update_epochs", type=int, default=10)
@@ -92,6 +94,7 @@ if __name__ == "__main__":
 
     score = run_ppo(
         output_path=output_path,
+        steps=args.steps,
         clipping_epsilon=args.clipping_epsilon,
         lr=args.lr,
         update_epochs=args.update_epochs,
@@ -105,4 +108,5 @@ if __name__ == "__main__":
     )
 
     print()
-    print(2.0)
+    print(score)
+

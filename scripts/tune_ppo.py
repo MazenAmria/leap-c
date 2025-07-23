@@ -19,6 +19,7 @@ def objective(trial):
     command = (
         f"python scripts/run_ppo.py "
         f"--device cuda:{gpu_id} "
+        f"--steps 100000 "
         f"--clipping_epsilon {clipping_epsilon} "
         f"--lr {lr} "
         f"--update_epochs {update_epochs} "
@@ -42,6 +43,7 @@ def objective(trial):
 study = optuna.create_study(
     direction="maximize", study_name="ppo_hyperparameter_tuning"
 )
-study.optimize(objective, n_trials=4, n_jobs=NUM_GPUS, show_progress_bar=True)
+study.optimize(objective, n_trials=200, n_jobs=NUM_GPUS, show_progress_bar=True)
 
 study.trials_dataframe().to_csv("ppo_hyperparameter_tuning_results.csv", index=False)
+
