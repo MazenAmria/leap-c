@@ -1,4 +1,5 @@
 from argparse import ArgumentParser
+from dataclasses import asdict
 from pathlib import Path
 
 import neps
@@ -60,7 +61,7 @@ def objective(
             "project": "leap-c",
             "entity": wandb_team,
             "name": pipeline_directory.parts[-1],
-            "config": cfg
+            "config": asdict(cfg),
         }
 
     trainer = PpoTrainer(
@@ -110,6 +111,6 @@ neps.run(
     max_evaluations_total=160,
     root_directory=args.output_path,
     optimizer=neps.algorithms.async_hb,
-    continue_until_max_evaluation_completed=True, 
+    continue_until_max_evaluation_completed=True,
     overwrite_working_directory=False,
 )
