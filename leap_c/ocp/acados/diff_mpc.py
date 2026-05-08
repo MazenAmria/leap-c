@@ -124,7 +124,6 @@ class AcadosDiffMpcFunction(DiffFunction):
         self,
         ocp: AcadosOcp | AcadosDiffOcp,
         initializer: AcadosDiffMpcInitializer | None = None,
-        sensitivity_ocp: AcadosOcp | None = None,
         discount_factor: float | None = None,
         export_directory: Path | None = None,
         n_batch_init: int | None = None,
@@ -137,9 +136,6 @@ class AcadosDiffMpcFunction(DiffFunction):
             ocp: The acados ocp object defining the optimal control problem structure.
             initializer: The initializer used to provide initial guesses for the solver, if none are
                 provided explicitly or on a retry. Uses a zero iterate by default.
-            sensitivity_ocp: An optional acados ocp object for obtaining the sensitivities.
-                If none is provided, the sensitivity ocp will be derived from the given "normal"
-                `ocp`.
             discount_factor: An optional discount factor for the sensitivity problem.
                 If none is provided, the default acados weighting will be used, i.e., `1/N_horizon`
                 on the stage cost and `1` on the terminal cost.
@@ -157,7 +153,6 @@ class AcadosDiffMpcFunction(DiffFunction):
         self.forward_batch_solver, self.backward_batch_solver = (
             create_forward_backward_batch_solvers(
                 ocp=ocp,
-                sensitivity_ocp=sensitivity_ocp,
                 discount_factor=discount_factor,
                 export_directory=export_directory,
                 n_batch_init=DEFAULT_N_BATCH_INIT if n_batch_init is None else n_batch_init,
