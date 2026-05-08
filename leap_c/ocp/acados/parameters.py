@@ -337,6 +337,12 @@ class AcadosParameterManager:
                         f"Parameter '{param.name}' has splits {param.splits} "
                         f"but the last element must be either {N_horizon - 1} or {N_horizon}."
                     )
+            if param.splits and isinstance(param.splits, int):
+                if param.splits > N_horizon + 1:
+                    raise ValueError(
+                        f"Parameter '{param.name}' has {param.splits} splits, which exceeds the "
+                        f"number of stages {N_horizon + 1}."
+                    )
         self.parameters = {param.name: param for param in parameters}
 
         self.N_horizon = N_horizon
@@ -376,6 +382,12 @@ class AcadosParameterManager:
                 raise ValueError(
                     f"Parameter '{parameter.name}' has splits {parameter.splits} "
                     f"but the last element must be either {self.N_horizon - 1} or {self.N_horizon}."
+                )
+        if parameter.splits and isinstance(parameter.splits, int):
+            if parameter.splits > self.N_horizon + 1:
+                raise ValueError(
+                    f"Parameter '{parameter.name}' has {parameter.splits} splits, which exceeds the"
+                    f" number of stages {self.N_horizon + 1}."
                 )
         self.parameters[parameter.name] = parameter
         if parameter.interface == "learnable":

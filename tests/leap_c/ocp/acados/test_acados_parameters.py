@@ -349,6 +349,45 @@ def test_vary_stages_last_element_not_valid():
         AcadosParameterManager(params, N_horizon=N_horizon)
 
 
+def test_integer_splits_exceeds_horizon_on_init():
+    """Test that integer splits cannot exceed N_horizon + 1 on init."""
+    N_horizon = 5
+    params = [
+        AcadosParameter(
+            name="too_many_splits",
+            default=np.array([1.0]),
+            interface="learnable",
+            splits=N_horizon + 2,
+        ),
+    ]
+
+    with pytest.raises(
+        ValueError,
+        match=rf"Parameter 'too_many_splits' has {N_horizon + 2} splits, which exceeds the "
+        rf"number of stages {N_horizon + 1}\.",
+    ):
+        AcadosParameterManager(params, N_horizon=N_horizon)
+
+
+def test_integer_splits_exceeds_horizon_on_add():
+    """Test that integer splits cannot exceed N_horizon + 1 on add."""
+    N_horizon = 5
+    manager = AcadosParameterManager([], N_horizon=N_horizon)
+    param = AcadosParameter(
+        name="too_many_splits",
+        default=np.array([1.0]),
+        interface="learnable",
+        splits=N_horizon + 2,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=rf"Parameter 'too_many_splits' has {N_horizon + 2} splits, which exceeds the "
+        rf"number of stages {N_horizon + 1}\.",
+    ):
+        manager.add_parameter(param)
+
+
 def test_indicator_creation():
     """Test that indicator is created when vary_stages are used."""
     N_horizon = 5
