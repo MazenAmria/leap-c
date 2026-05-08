@@ -68,6 +68,7 @@ class AcadosDiffOcp(AcadosOcp):
         default: np.ndarray,
         space: gym.spaces.Space | None = None,
         differentiable: bool = False,
+        splits: list[int] | int | Literal["stagewise", "global"] = "global",
         end_stages: list[int] | None = None,
     ) -> ca.SX | ca.MX:
         """Register a parameter and return a CasADi symbolic for immediate use.
@@ -82,7 +83,10 @@ class AcadosDiffOcp(AcadosOcp):
             differentiable: If True, parameter supports sensitivities (learnable).
                 If False, parameter is changeable at runtime but not differentiable
                 (non-learnable).
-            end_stages: Stage variation boundaries (see AcadosParameter.end_stages).
+            splits: Defines how the parameter varies across stages. Accepts a `list[int]` of stage
+                boundaries, an `int` number of equal splits, `"stagewise"`, or `"global"`.
+                Defaults to `"global"`. See `AcadosParameter` for details.
+            end_stages: Deprecated. Use `splits` instead. See `AcadosParameter` for details.
 
         Returns:
             A CasADi SX (or MX) symbolic expression for immediate use in OCP formulation.
@@ -93,7 +97,8 @@ class AcadosDiffOcp(AcadosOcp):
             default=default,
             space=space,
             interface=interface,
-            end_stages=end_stages or [],
+            splits=splits,
+            end_stages=end_stages,
         )
         self.parameter_manager.add_parameter(param)
         return self.parameter_manager.get(name)

@@ -7,7 +7,11 @@ import pytest
 import torch
 from acados_template import AcadosOcp, AcadosOcpSolver
 
-from leap_c.ocp.acados.parameters import AcadosParameter, AcadosParameterManager
+from leap_c.ocp.acados.parameters import (
+    AcadosParameter,
+    AcadosParameterManager,
+    _define_starts_and_ends,
+)
 from leap_c.ocp.acados.torch import AcadosDiffMpcTorch
 
 
@@ -339,7 +343,7 @@ def test_vary_stages_last_element_not_valid():
 
     with pytest.raises(
         ValueError,
-        match=r"Parameter 'exceed_horizon' has end_stages \[5\] "
+        match=r"Parameter 'exceed_horizon' has splits \[5\] "
         r"but the last element must be either 9 or 10.",
     ):
         AcadosParameterManager(params, N_horizon=N_horizon)
@@ -1555,3 +1559,94 @@ def test_add_parameter_interface_non_learnable():
     # Non-learnable should appear in non_learnable_parameter_store with original name
     assert len(manager._non_learnable_parameter_store.symbols) == 1
     assert "non_learnable" in manager._non_learnable_parameter_store.symbols
+
+
+def test_creating_parameter_with_end_stages_warn_deprecation():
+    """Test that creating a parameter with `end_stages` raises a deprecation warning."""
+    with pytest.warns(
+        DeprecationWarning,
+        match=re.escape(
+            "Passing splits via `end_stages` is deprecated."
+            " Please use the `splits` argument instead."
+        ),
+    ):
+        _ = AcadosParameter(
+            name="deprecated_param",
+            default=np.array([1.0]),
+            interface="learnable",
+            end_stages=[2, 5],
+        )
+
+
+def test_define_starts_and_ends_stagewise():
+    """Test starts/ends for stagewise splits."""
+    starts, ends = _define_starts_and_ends(splits="stagewise", N_horizon=3)
+
+    assert starts == [0, 1, 2, 3]
+    assert ends == [0, 1, 2, 3]
+
+
+def test_define_starts_and_ends_list_splits():
+    """Test starts/ends for explicit list splits."""
+    starts, ends = _define_starts_and_ends(splits=[2, 5], N_horizon=5)
+
+    assert starts == [0, 3]
+    assert ends == [2, 5]
+
+
+def test_define_starts_and_ends_int_splits_balanced():
+    """Test starts/ends for integer splits with remainder."""
+    starts, ends = _define_starts_and_ends(splits=3, N_horizon=4)
+
+    assert starts == [0, 2, 4]
+    assert ends == [1, 3, 4]
+
+
+def test_acados_parameter_splits_empty_list_raises():
+    """Test empty splits list raises a ValueError."""
+    with pytest.raises(
+        ValueError,
+        match=re.escape(
+            "Parameter 'empty_splits' has empty splits list. Hint: if you meant to define a"
+            " global parameter, please set splits='global' instead."
+        ),
+    ):
+        AcadosParameter(
+            name="empty_splits",
+            default=np.array([1.0]),
+            interface="learnable",
+            splits=[],
+        )
+
+
+def test_acados_parameter_splits_unsorted_list_raises():
+    """Test unsorted splits list raises a ValueError."""
+    with pytest.raises(
+        ValueError,
+        match=re.escape(
+            "Parameter 'unsorted_splits' splits [3, 1] are not sorted in ascending order."
+        ),
+    ):
+        AcadosParameter(
+            name="unsorted_splits",
+            default=np.array([1.0]),
+            interface="learnable",
+            splits=[3, 1],
+        )
+
+
+def test_acados_parameter_splits_invalid_int_raises():
+    """Test invalid integer splits raises a ValueError."""
+    with pytest.raises(
+        ValueError,
+        match=re.escape(
+            "Parameter 'invalid_int_splits' has invalid splits value 1, number of splits must be "
+            "`>1`. If you meant to define a global parameter, please set splits='global'"
+        ),
+    ):
+        AcadosParameter(
+            name="invalid_int_splits",
+            default=np.array([1.0]),
+            interface="learnable",
+            splits=1,
+        )
