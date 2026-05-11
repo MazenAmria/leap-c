@@ -526,7 +526,6 @@ def diff_mpc(acados_test_ocp: AcadosOcp) -> AcadosDiffMpcTorch:
     return AcadosDiffMpcTorch(
         ocp=acados_test_ocp,
         initializer=None,
-        sensitivity_ocp=None,
         discount_factor=None,
         dtype=torch.float64,
     )
@@ -541,7 +540,6 @@ def diff_mpc_with_stagewise_varying_params(
     diff_mpc = AcadosDiffMpcTorch(
         ocp=acados_test_ocp_with_stagewise_varying_params,
         initializer=None,
-        sensitivity_ocp=None,
         discount_factor=None,
         dtype=torch.float64,
     )

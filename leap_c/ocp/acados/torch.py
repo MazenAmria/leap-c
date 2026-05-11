@@ -37,7 +37,6 @@ class AcadosDiffMpcTorch(torch.nn.Module):
         self,
         ocp: AcadosOcp | AcadosDiffOcp,
         initializer: AcadosDiffMpcInitializer | None = None,
-        sensitivity_ocp: AcadosOcp | None = None,
         discount_factor: float | None = None,
         export_directory: Path | None = None,
         n_batch_init: int | None = None,
@@ -51,9 +50,6 @@ class AcadosDiffMpcTorch(torch.nn.Module):
             ocp: The acados ocp object defining the optimal control problem structure.
             initializer: The initializer used to provide initial guesses for the solver, if none are
                 provided explicitly or on a retry. Uses a zero iterate by default.
-            sensitivity_ocp: An optional acados ocp object for obtaining the sensitivities.
-                If none is provided, the sensitivity ocp will be derived from the given "normal"
-                `ocp`.
             discount_factor: An optional discount factor for the sensitivity problem.
                 If none is provided, the default acados weighting will be used, i.e., `1/N_horizon`
                 on the stage cost and `1` on the terminal cost.
@@ -73,7 +69,6 @@ class AcadosDiffMpcTorch(torch.nn.Module):
         self.diff_mpc_fun = AcadosDiffMpcFunction(
             ocp=ocp,
             initializer=initializer,
-            sensitivity_ocp=sensitivity_ocp,
             discount_factor=discount_factor,
             export_directory=export_directory,
             n_batch_init=n_batch_init,

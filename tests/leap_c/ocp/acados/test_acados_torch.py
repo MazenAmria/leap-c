@@ -69,7 +69,6 @@ def test_file_management(diff_mpc: AcadosDiffMpcTorch, tol: float = 1e-5) -> Non
     AcadosDiffMpcTorch(
         ocp=diff_mpc.diff_mpc_fun.ocp,
         initializer=diff_mpc.diff_mpc_fun.initializer,
-        sensitivity_ocp=diff_mpc.diff_mpc_fun.backward_batch_solver.ocp_solvers[0].acados_ocp,  # type: ignore
         export_directory=export_directory,
     )
 
