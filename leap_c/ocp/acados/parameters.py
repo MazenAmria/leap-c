@@ -27,12 +27,17 @@ class AcadosParameter:
             parameters also after creation of the solver), or `"learnable"` (parameters directly
             exposed to the learning interface, in particular supporting sensitivities). Defaults to
             `"fix"`.
-        end_stages: Sorted list (ascending order) of stages after which the parameter varies.
-            Only used for the `"learnable"` interface. If empty, the parameter remains constant
-            across all stages. Defaults to an empty list.
-            Example: If the horizon has `9` stages (`0` to `9`, including the terminal stage),
-            and `end_stages = [4, 9]`, then the parameter will have one value for stages `0` to `4`,
-            and a different value for stages `5` to `9`.
+        splits: Defines how the parameter varies across stages. Only used for the `"learnable"`
+            interface. Accepts:
+            - `list[int]`: Sorted (ascending) stage boundaries. The parameter takes one value per
+            resulting segment. Example: with `9` stages (`0` to `9`) and `splits = [4, 9]`, the
+            parameter has one value for stages `0` to `4` and another for stages `5` to `9`.
+            - `int`: Number of equal-sized splits.
+            - `"stagewise"`: One value per stage. Equivalent to `list(range(N_horizon + 1))`.
+            - `"global"`: A single value across all stages. Equivalent to `[N_horizon]`.
+            Defaults to `"global"`.
+        end_stages: Deprecated alias for `splits` accepting `list[int]` (or `[]` for
+            a global value), kept for backward compatibility.
     """
 
     # Fields from base Parameter class
@@ -42,9 +47,42 @@ class AcadosParameter:
     interface: Literal["fix", "learnable", "non-learnable"] = "fix"
 
     # Additional acados-specific field
-    end_stages: list[int] = field(default_factory=list)
+    splits: list[int] | int | Literal["stagewise", "global"] = "global"
+    end_stages: list[int] | None = None
 
     def __post_init__(self):
+        if self.end_stages is not None:
+            warn(
+                "Passing splits via `end_stages` is deprecated."
+                " Please use the `splits` argument instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            self.splits = "global" if not self.end_stages else self.end_stages
+            del self.end_stages
+
+        if isinstance(self.splits, list) and not self.splits:
+            raise ValueError(
+                f"Parameter '{self.name}' has empty splits list. Hint: if you meant to define a"
+                " global parameter, please set splits='global' instead."
+            )
+
+        if isinstance(self.splits, list) and self.splits != sorted(self.splits):
+            raise ValueError(
+                f"Parameter '{self.name}' splits {self.splits} are not sorted in ascending order."
+            )
+
+        if isinstance(self.splits, int) and self.splits <= 1:
+            hint = (
+                " If you meant to define a global parameter, please set splits='global'"
+                if self.splits == 1
+                else ""
+            )
+            raise ValueError(
+                f"Parameter '{self.name}' has invalid splits value {self.splits}, number of splits"
+                f" must be `>1`.{hint}"
+            )
+
         if self.default.ndim > 2:
             raise ValueError(
                 f"Parameter '{self.name}' has {self.default.ndim} dimensions, "
@@ -71,12 +109,6 @@ class AcadosParameter:
                     f"Parameter '{self.name}' has space of type {type(self.space)}, "
                     "but currently only gym.spaces.Box is supported."
                 )
-
-            if self.end_stages and sorted(self.end_stages) != self.end_stages:
-                raise ValueError(
-                    f"Parameter '{self.name}' has end_stages {self.end_stages} which are not "
-                    "in sorted ascending order."
-                )
         else:
             if self.space is not None:
                 warn(
@@ -85,10 +117,10 @@ class AcadosParameter:
                     UserWarning,
                     stacklevel=2,
                 )
-            if self.end_stages:
+            if self.splits:
                 warn(
-                    f"Parameter '{self.name}' with interface '{self.interface}' defines end_stages."
-                    " The end_stages will be ignored as only 'learnable' parameters supports it.",
+                    f"Parameter '{self.name}' with interface '{self.interface}' defines splits."
+                    " The splits will be ignored as only 'learnable' parameters supports it.",
                     UserWarning,
                     stacklevel=2,
                 )
@@ -156,7 +188,7 @@ class AcadosParameterManager:
         # Step 1: define parameters
         params = [
             AcadosParameter("price", default=np.array([1.0]), interface="learnable",
-                            end_stages=[4, 9]),
+                            splits=[4, 9]),
             AcadosParameter("outdoor_temp", default=np.array([20.0]), interface="non-learnable"),
         ]
         manager = AcadosParameterManager(params, N_horizon=10)
@@ -168,7 +200,7 @@ class AcadosParameterManager:
         # Step 3: wire into acados
         manager.assign_to_ocp(ocp)
 
-    **Stage-varying learnable parameters** (``end_stages`` non-empty) are implemented via a
+    **Stage-varying learnable parameters** (``splits`` are not ``"global"``) are implemented via a
     one-hot *indicator* vector that is appended to the non-learnable parameters.  At stage ``k``
     only ``indicator[k]`` is 1; ``get()`` returns a weighted sum over all stage blocks so the
     same symbolic expression evaluates to the correct block value at every stage.
@@ -226,7 +258,7 @@ class AcadosParameterManager:
             raise ValueError(f"Unsupported casadi_type: {casadi_type}")
 
     def _store_learnable_parameter(self, parameter: AcadosParameter) -> None:
-        if parameter.end_stages:
+        if parameter.splits != "global":
             self._need_indicator = True
             if "indicator" not in self._non_learnable_parameter_store.symbols:
                 indicator = AcadosParameter(
@@ -236,7 +268,7 @@ class AcadosParameterManager:
                 )
                 self._store_non_learnable_parameter(indicator)
             starts, ends = _define_starts_and_ends(
-                end_stages=parameter.end_stages, N_horizon=self.N_horizon
+                splits=parameter.splits, N_horizon=self.N_horizon
             )
             for start, end in zip(starts, ends):
                 # Build symbolic expressions for each stage
@@ -283,7 +315,7 @@ class AcadosParameterManager:
                 ``Function`` objects that are evaluated multiple times).
 
         Raises:
-            ValueError: If any parameter has ``end_stages`` whose last element is not
+            ValueError: If any parameter has list ``splits`` whose last element is not
             ``N_horizon - 1`` or ``N_horizon``.
         """
         # add parameters to the manager
@@ -298,12 +330,19 @@ class AcadosParameterManager:
             )
         # validate parameter dimensions before storing
         for param in parameters:
-            # Check end_stages convention
-            if param.end_stages and param.end_stages[-1] not in [N_horizon - 1, N_horizon]:
-                raise ValueError(
-                    f"Parameter '{param.name}' has end_stages {param.end_stages} "
-                    f"but the last element must be either {N_horizon - 1} or {N_horizon}."
-                )
+            # Check splits convention
+            if param.splits and isinstance(param.splits, list):
+                if param.splits[-1] not in [N_horizon - 1, N_horizon]:
+                    raise ValueError(
+                        f"Parameter '{param.name}' has splits {param.splits} "
+                        f"but the last element must be either {N_horizon - 1} or {N_horizon}."
+                    )
+            if param.splits and isinstance(param.splits, int):
+                if param.splits > N_horizon + 1:
+                    raise ValueError(
+                        f"Parameter '{param.name}' has {param.splits} splits, which exceeds the "
+                        f"number of stages {N_horizon + 1}."
+                    )
         self.parameters = {param.name: param for param in parameters}
 
         self.N_horizon = N_horizon
@@ -335,14 +374,21 @@ class AcadosParameterManager:
                 f"Parameter '{parameter.name}' already exists in the manager. "
                 "Use a different name or modify the existing parameter instead."
             )
-        if parameter.end_stages and parameter.end_stages[-1] not in [
-            self.N_horizon - 1,
-            self.N_horizon,
-        ]:
-            raise ValueError(
-                f"Parameter '{parameter.name}' has end_stages {parameter.end_stages} "
-                f"but the last element must be either {self.N_horizon - 1} or {self.N_horizon}."
-            )
+        if parameter.splits and isinstance(parameter.splits, list):
+            if parameter.splits[-1] not in [
+                self.N_horizon - 1,
+                self.N_horizon,
+            ]:
+                raise ValueError(
+                    f"Parameter '{parameter.name}' has splits {parameter.splits} "
+                    f"but the last element must be either {self.N_horizon - 1} or {self.N_horizon}."
+                )
+        if parameter.splits and isinstance(parameter.splits, int):
+            if parameter.splits > self.N_horizon + 1:
+                raise ValueError(
+                    f"Parameter '{parameter.name}' has {parameter.splits} splits, which exceeds the"
+                    f" number of stages {self.N_horizon + 1}."
+                )
         self.parameters[parameter.name] = parameter
         if parameter.interface == "learnable":
             self._store_learnable_parameter(parameter)
@@ -363,7 +409,7 @@ class AcadosParameterManager:
                 Not needed if overwrites is provided.
             **overwrites: Overwrite values for specific parameters.
                 The keys should correspond to the parameter names to overwrite.
-                For stage-varying parameters (those with end_stages), the values need to be
+                For stage-varying parameters (those with splits), the values need to be
                 np.ndarray with shape `(batch_size, N_horizon + 1)` or
                 `(batch_size, N_horizon + 1, pdim)`.
                 For non-stage-varying parameters, shape `(batch_size,)` or `(batch_size, pdim)`.
@@ -416,11 +462,11 @@ class AcadosParameterManager:
                     f"but expected {batch_size}."
                 )
 
-            if param.end_stages:
+            if param.splits != "global":
                 # Stage-varying parameter
                 Np1 = self.N_horizon + 1
                 starts, ends = _define_starts_and_ends(
-                    end_stages=param.end_stages, N_horizon=self.N_horizon
+                    splits=param.splits, N_horizon=self.N_horizon
                 )
 
                 # Expected shape: (batch_size, N_horizon + 1) or (batch_size, N_horizon + 1, pdim)
@@ -543,7 +589,7 @@ class AcadosParameterManager:
     def get(self, name: str) -> ca.SX | ca.MX | np.ndarray:
         """Get the symbolic variable (or fixed value) for a parameter.
 
-        For stage-varying learnable parameters (those with ``end_stages``), the returned
+        For stage-varying learnable parameters (those with ``splits``), the returned
         expression is a weighted sum over all stage blocks, gated by the ``indicator`` vector
         in the non-learnable parameters.  The expression evaluates to the correct block value
         at each stage, but **only if the indicator is set correctly** via
@@ -567,9 +613,12 @@ class AcadosParameterManager:
         if self.parameters[name].interface == "fix":
             return self.parameters[name].default
 
-        if self.parameters[name].interface == "learnable" and self.parameters[name].end_stages:
+        if (
+            self.parameters[name].interface == "learnable"
+            and self.parameters[name].splits != "global"
+        ):
             starts, ends = _define_starts_and_ends(
-                end_stages=self.parameters[name].end_stages, N_horizon=self.N_horizon
+                splits=self.parameters[name].splits, N_horizon=self.N_horizon
             )
             indicators = []
             variables = []
@@ -684,8 +733,22 @@ class AcadosParameterManager:
         return param_values[..., np.r_[*idx]].reshape(-1, len(keys))
 
 
-def _define_starts_and_ends(end_stages: list[int], N_horizon: int) -> tuple[list[int], list[int]]:
+def _define_starts_and_ends(
+    splits: list[int] | int | Literal["stagewise"], N_horizon: int
+) -> tuple[list[int], list[int]]:
     """Define the start and end indices for stage-varying parameters."""
-    ends = end_stages
+    if splits == "stagewise":
+        ends = list(range(N_horizon + 1))
+    elif isinstance(splits, int):
+        split_size = (N_horizon + 1) // splits
+        remainder = (N_horizon + 1) % splits
+        sizes = [split_size] * splits
+        for i in range(remainder):
+            sizes[i] += 1
+        ends = (np.cumsum(sizes) - 1).tolist()
+    elif isinstance(splits, list):
+        ends = splits
+    else:
+        raise ValueError(f"Invalid splits value: {splits}")
     starts = [0] + [v + 1 for v in ends if v + 1 <= N_horizon]
     return starts, ends
