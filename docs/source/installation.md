@@ -68,7 +68,7 @@ optional extra:
 | Extra | Framework | Required for |
 |-------|-----------|-------------|
 | `torch` | PyTorch | `AcadosDiffMpcLayerTorch` |
-| `jax` | JAX | (planned) |
+| `jax` | JAX | `AcadosDiffMpcLayerJax` |
 
 **uv:**
 

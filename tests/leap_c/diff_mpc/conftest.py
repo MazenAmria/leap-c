@@ -458,15 +458,34 @@ def acados_test_ocp_with_stagewise_varying_params(
 
 
 @pytest.fixture(scope="session")
-def diff_mpc(acados_test_ocp: AcadosOcp) -> AcadosDiffMpcLayerTorch:
+def _param_manager(acados_test_ocp: AcadosOcp) -> AcadosParameterManager:
     pm = acados_test_ocp._test_pm
     del acados_test_ocp._test_pm
+    return pm
+
+
+@pytest.fixture(scope="session")
+def diff_mpc(
+    acados_test_ocp: AcadosOcp, _param_manager: AcadosParameterManager
+) -> AcadosDiffMpcLayerTorch:
     return AcadosDiffMpcLayerTorch(
         ocp=acados_test_ocp,
-        parameter_manager=pm,
+        parameter_manager=_param_manager,
         initializer=None,
         discount_factor=None,
         dtype=torch.float64,
+    )
+
+
+@pytest.fixture(scope="session")
+def diff_mpc_jax(acados_test_ocp: AcadosOcp, _param_manager: AcadosParameterManager):
+    from leap_c.jax import AcadosDiffMpcLayerJax
+
+    return AcadosDiffMpcLayerJax(
+        ocp=acados_test_ocp,
+        parameter_manager=_param_manager,
+        initializer=None,
+        discount_factor=None,
     )
 
 
