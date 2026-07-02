@@ -68,7 +68,11 @@ optional extra:
 | Extra | Framework | Required for |
 |-------|-----------|-------------|
 | `torch` | PyTorch | `AcadosDiffMpcLayerTorch` |
-| `jax` | JAX | (planned) |
+| `jax` | JAX | `AcadosDiffMpcLayerJax` |
+
+### PyTorch
+
+PyTorch wheels default to GPU (CUDA).
 
 **uv:**
 
@@ -82,6 +86,40 @@ uv sync --extra torch --index-url https://download.pytorch.org/whl/cpu  # CPU-on
 ```bash
 pip install -e ".[torch]"                                       # GPU (default)
 pip install -e ".[torch]" --extra-index-url https://download.pytorch.org/whl/cpu  # CPU-only
+```
+
+### JAX
+
+JAX wheels default to **CPU**. To use a GPU, upgrade JAX with a CUDA variant
+after the initial install.
+
+**uv** (CPU):
+
+```bash
+uv sync --extra jax
+```
+
+**uv** (GPU, CUDA 12):
+
+```bash
+uv sync --extra jax
+uv pip install "jax[cuda12]"
+```
+
+For other CUDA setups (local CUDA, ROCm, TPU), see the
+`JAX installation guide <https://jax.readthedocs.io/en/latest/installation.html>`_.
+
+**pip** (CPU):
+
+```bash
+pip install -e ".[jax]"
+```
+
+**pip** (GPU, CUDA 12):
+
+```bash
+pip install -e ".[jax]"
+pip install "jax[cuda12]"
 ```
 
 If no backend is installed and you try to import a backend-specific module,

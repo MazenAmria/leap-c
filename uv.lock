@@ -962,6 +962,7 @@ dependencies = [
 [package.optional-dependencies]
 dev = [
     { name = "furo" },
+    { name = "jax" },
     { name = "myst-parser" },
     { name = "pre-commit" },
     { name = "pytest" },
@@ -1002,6 +1003,7 @@ requires-dist = [
     { name = "furo", marker = "extra == 'docs'" },
     { name = "jax", marker = "extra == 'jax'" },
     { name = "leap-c", extras = ["docs"], marker = "extra == 'dev'" },
+    { name = "leap-c", extras = ["jax"], marker = "extra == 'dev'" },
     { name = "leap-c", extras = ["test"], marker = "extra == 'dev'" },
     { name = "leap-c", extras = ["torch"], marker = "extra == 'dev'" },
     { name = "marimo", marker = "extra == 'notebooks'", specifier = ">=0.13.0" },

@@ -3,13 +3,16 @@
 The main user-facing interfaces of leap-c. Each entry links to its full,
 type-annotated reference page.
 
-- {py:class}`~leap_c.torch.AcadosDiffMpcLayerTorch` — the central interface:
+- {py:class}`~leap_c.torch.AcadosDiffMpcLayerTorch` — the PyTorch interface:
   wraps an acados OCP solver as a differentiable PyTorch module.
+- {py:class}`~leap_c.jax.AcadosDiffMpcLayerJax` — the JAX interface:
+  wraps an acados OCP solver as a JAX-callable with custom VJP.
 - {py:class}`~leap_c.parameters.base.AcadosParameterManager` — define and
   manage the parameters of an acados OCP without touching CasADi/acados internals.
 
 ```{autoapisummary}
 leap_c.torch.AcadosDiffMpcLayerTorch
+leap_c.jax.AcadosDiffMpcLayerJax
 leap_c.parameters.base.AcadosParameterManager
 ```
 

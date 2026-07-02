@@ -35,7 +35,7 @@ docs = [
     "sphinx-autobuild",
     "sphinxcontrib-mermaid",
 ]
-dev = ["leap_c[docs]", "leap_c[test]", "leap_c[torch]", "pre-commit", "ruff"]
+dev = ["leap_c[docs]", "leap_c[test]", "leap_c[torch]", "leap_c[jax]", "pre-commit", "ruff"]
 
 [tool.setuptools]
 packages = ["leap_c"]
